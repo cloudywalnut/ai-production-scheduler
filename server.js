@@ -244,8 +244,8 @@ app.post("/upload", upload.single("script"), async (req, res) => {
   console.log("File size (bytes):", req.file.size);
 
   // Convert buffer to stream if needed
-  fs.writeFileSync("/Vodstr/tempMemory/temp.pdf", req.file.buffer);
-  const pdfStream = fs.createReadStream("/Vodstr/tempMemory/temp.pdf");
+  fs.writeFileSync("temp.pdf", req.file.buffer);
+  const pdfStream = fs.createReadStream("temp.pdf");
   const extractedData = await extractData(pdfStream);
   const scheduledData = await scheduleScenes(extractedData.scenes,7);
   
