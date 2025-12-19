@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movie Schedule</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #f4f4f4;
+        padding: 20px;
+    }
+    .day-card {
+        background: #fff;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .day-header {
+        font-size: 1.5em;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #333;
+    }
+    .scene-card {
+        background: #f9f9f9;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        border-left: 4px solid #4CAF50;
+    }
+    .scene-title {
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .scene-details {
+        font-size: 0.9em;
+        color: #555;
+    }
+
+    .upload-box {
+        width: auto;
+        height: 140px;
+        border: 2px dashed #4f46e5;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: auto;
+        cursor: pointer;
+        background: #f8fafc;
+        transition: 0.2s ease;
+        font-family: system-ui, sans-serif;
+    }
+
+    .upload-box:hover {
+        background: #eef2ff;
+        border-color: #4338ca;
+    }
+
+    .upload-text {
+        color: #4f46e5;
+        font-weight: 600;
+        font-size: 24px;
+        text-align: center;
+    }
+
+    input[type="file"] {
+        display: none;
+    }
+
+</style>
+</head>
+<body>
+
+<label class="upload-box">
+  <span class="upload-text">Click to upload script 📋</span>
+  <input type="file" id="scriptUpload" />
+</label>
+<div id="scheduleContainer"></div>
+
+
+<script>
+    
+    let schedule = [];
+    let fileInMemory = null;
+
+    const container = document.getElementById("scheduleContainer");
+
+    function renderSchedule() {
+        container.innerHTML = ""; // clear old stuff just in case
+
+        schedule.forEach(day => {
+            const dayCard = document.createElement("div");
+            dayCard.className = "day-card";
+
+            const dayHeader = document.createElement("div");
+            dayHeader.className = "day-header";
+            dayHeader.textContent = `Day ${day.day} - Total Time: ${day.totalTime} hours`;
+            dayCard.appendChild(dayHeader);
+
+            day.scenes.forEach(scene => {
+                const sceneCard = document.createElement("div");
+                sceneCard.className = "scene-card";
+
+                const sceneTitle = document.createElement("div");
+                sceneTitle.className = "scene-title";
+                sceneTitle.textContent = `Scene ${scene.scene_number}: ${scene.scene_heading}`;
+                sceneCard.appendChild(sceneTitle);
+
+                const sceneDetails = document.createElement("div");
+                sceneDetails.className = "scene-details";
+                sceneDetails.innerHTML = `
+                    <strong>Location:</strong> ${scene.location_name}<br>
+                    <strong>Characters:</strong> ${scene.characters.join(", ")}<br>
+                    <strong>Estimated Time:</strong> ${scene.estimatedTime} hours<br>
+                    <strong>Summary:</strong> ${scene.scene_summary}
+                `;
+                sceneCard.appendChild(sceneDetails);
+
+                dayCard.appendChild(sceneCard);
+            });
+
+            container.appendChild(dayCard);
+        });
+    }
+
+    document.getElementById("scriptUpload").addEventListener("change", (e) => {
+        fileInMemory = e.target.files[0]; // File object stays in memory
+        console.log("File loaded:", fileInMemory.name);
+
+        if (!fileInMemory) return alert("No file selected");
+
+        const formData = new FormData();
+        formData.append("script", fileInMemory); // key must match server-side multer field
+
+        fetch("http://localhost:3000/upload", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            console.log("Server response:", "Reached Here");
+            schedule = data.schedule;
+            renderSchedule();
+        })
+        .catch(err => console.error(err));
+
+    });
+
+</script>
+
+
+</body>
+</html>
