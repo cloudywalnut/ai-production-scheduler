@@ -244,11 +244,12 @@ app.post("/upload", upload.single("script"), async (req, res) => {
   console.log("File size (bytes):", req.file.size);
 
   // Convert buffer to stream if needed
-  fs.writeFileSync("temp.pdf", req.file.buffer);
-  const pdfStream = fs.createReadStream("temp.pdf");
+  const tempFileName = `temp_${Date.now()}.pdf`
+  fs.writeFileSync(tempFileName, req.file.buffer);
+  const pdfStream = fs.createReadStream(tempFileName);
   const extractedData = await extractData(pdfStream);
   const scheduledData = await scheduleScenes(extractedData.scenes,7);
-  
+  fs.unlinkSync(tempFileName);
   res.json({
     schedule: scheduledData,
   });
