@@ -135,7 +135,7 @@
         const formData = new FormData();
         formData.append("script", fileInMemory); // key must match server-side multer field
 
-        fetch("http://localhost:3000/upload", {
+        fetch("https://vodstr.up.railway.app/upload", {
             method: "POST",
             body: formData
         })
