@@ -21,6 +21,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // Essential Functions:
 
+// Wants to Chunk Pdf
 async function chunkPDF(buffer, pagesPerChunk = 30) {
   const pdf = await PDFDocument.load(buffer);
   const totalPages = pdf.getPageCount();
@@ -42,6 +43,7 @@ async function chunkPDF(buffer, pagesPerChunk = 30) {
   return chunks;
 }
 
+// Extracting Data
 async function extractData(pdfStream) {
   try {
 
@@ -194,123 +196,165 @@ async function extractData(pdfStream) {
   }
 }
 
-function scheduleScenes(scenes, maxDayTime) {
+// Scheduling Scenes
+function scheduleScenes(scenes, maxDayTimeHours) {
+    // Get locations sorted by most scenes first
+    let locationSceneMap = getLocationsSortedBySceneCount(scenes);
+    let shootingDays = [];
+    let currentDayNumber = 1;
 
-    // We Get the Sorted Location Map - Locations with more scenes first
-    let locationMap = get_SortedLocationMap(scenes);
-    let days = []; 
-    let dayNumber = 1;
-
-    // Keep scheduling until all scenes are assigned
-    while (Object.keys(locationMap).length > 0) {
+    // Continue scheduling until all scenes are assigned
+    while (Object.keys(locationSceneMap).length > 0) {
         let dayScenes = [];
-        let dayTime = 0;
+        let totalDayTimeUsed = 0;
 
-        for (let location in locationMap) {
-            
-            // If the remaining day time is less then 4 hours do not change location - PackUp
-            if (maxDayTime - dayTime <= 4){
+        for (let locationName in locationSceneMap) {
+            // If remaining day time is 4 hours or less, don't change location (avoid pack-up)
+            if (maxDayTimeHours - totalDayTimeUsed <= 4) {
                 continue;
             }
 
-            locationMap[location] = sort_subLocations(locationMap[location]) // Sorts by sub location - sub locations with more scenes first
-            locationMap[location] = sort_locationType(locationMap[location]) // Sorts by locationType - EXTD, INTD, INTN, EXTN, OTHERS
-            let locScenes = locationMap[location]
+            // Sort sub-locations with most scenes first - The EXTD, INTD, INTN, EXTN Sort function is inside this function
+            locationSceneMap[locationName] = sortSubLocationsBySceneCount(locationSceneMap[locationName]);
+            let locationScenes = locationSceneMap[locationName];
 
-            let i = 0;
-            while (i < locScenes.length) {
-                let scene = locScenes[i];
+            let sceneIndex = 0;
+            while (sceneIndex < locationScenes.length) {
+                let scene = locationScenes[sceneIndex];
 
-                if (dayTime + scene.estimatedTime <= maxDayTime) {
+                // Schedule scene if it fits in the day, or if it's the last scene at this location
+                const willSceneFit = totalDayTimeUsed + scene.estimatedTime <= maxDayTimeHours;
+                const isLastSceneAtLocation = locationScenes.length === 1;
+                
+                if (willSceneFit || isLastSceneAtLocation) {
                     dayScenes.push(scene);
-                    dayTime += scene.estimatedTime;
-                    locScenes.splice(i, 1); // remove scheduled scene
+                    totalDayTimeUsed += scene.estimatedTime;
+                    locationScenes.splice(sceneIndex, 1); // Remove scheduled scene
                 } else {
-                    i++;
+                    sceneIndex++;
                 }
             }
 
-             // Remove location if empty
-            if (locScenes.length === 0) delete locationMap[location];
-
+            // Remove location if all scenes have been scheduled
+            if (locationScenes.length === 0) {
+                delete locationSceneMap[locationName];
+            }
         }
 
-        // Need to add some sorting here so that the order goes from MORNING to EVENING - Extra Addition
-        const timeOrderArray = ["MORNING", "EVENING", "NIGHT", "UNKNOWN"]
-        dayScenes.sort((a,b) => {
-          return timeOrderArray.indexOf(a.time_of_day) - timeOrderArray.indexOf(b.time_of_day)
-        })
+        // Sort scenes within the day from MORNING to EVENING
+        const timeOfDayOrder = ["MORNING", "EVENING", "NIGHT", "UNKNOWN"];
+        dayScenes.sort((sceneA, sceneB) => {
+            return timeOfDayOrder.indexOf(sceneA.time_of_day) - timeOfDayOrder.indexOf(sceneB.time_of_day);
+        });
 
-        days.push({day: dayNumber, scenes: dayScenes, totalTime: dayTime});
-        dayNumber++;
-    
+        shootingDays.push({
+            day: currentDayNumber,
+            scenes: dayScenes,
+            totalTime: totalDayTimeUsed
+        });
+        
+        currentDayNumber++;
     }
 
-    return days;
-
+    return shootingDays;
 }
 
-function get_SortedLocationMap(scenes){
-    
+// Group scenes by location and sort locations by scene count
+function getLocationsSortedBySceneCount(scenes) {
     // Group scenes by location
     let locationMap = {};
+    
     for (let scene of scenes) {
-        if (!locationMap[scene.location_name]) locationMap[scene.location_name] = [];
-        locationMap[scene.location_name].push(scene);
+        const locationName = scene.location_name;
+        
+        if (!locationMap[locationName]) {
+            locationMap[locationName] = [];
+        }
+        
+        locationMap[locationName].push(scene);
 
-        // Gets how many scenes per location - scene_count
-        if (locationMap[scene.location_name]['scene_count']){
-            locationMap[scene.location_name]['scene_count'] = locationMap[scene.location_name]['scene_count'] + 1; 
-        }else{
-            locationMap[scene.location_name]['scene_count'] = 1; 
+        // Track scene count per location
+        if (locationMap[locationName].sceneCount) {
+            locationMap[locationName].sceneCount += 1;
+        } else {
+            locationMap[locationName].sceneCount = 1;
         }
     }
 
-    // Sorts the location by putting the location with most scenes first
+    // Sort locations by scene count (most scenes first)
     locationMap = Object.fromEntries(
-    Object.entries(locationMap)
-          .sort((a, b) => b[1]['scene_count'] - a[1]['scene_count'])
+        Object.entries(locationMap)
+            .sort((locationA, locationB) => locationB[1].sceneCount - locationA[1].sceneCount)
     );
 
     return locationMap;
-
 }
 
-function sort_subLocations(locScenes) {
+// Sort scenes within a location by sub-location (most scenes first)
+function sortSubLocationsBySceneCount(locationScenes) {
+    let subLocationSceneCount = {};
+    let sortedScenes = [];
 
-  let sub_locations = {};
-  let sorted_locScenes = [];
+    // Count scenes per sub-location
+    locationScenes.forEach(scene => {
+        const subLocationName = scene.sub_location_name;
+        subLocationSceneCount[subLocationName] = (subLocationSceneCount[subLocationName] || 0) + 1;
+    });
 
-  locScenes.forEach(scene => {
-    const key = scene.sub_location_name;
-    sub_locations[key] = (sub_locations[key] || 0) + 1;
-  });
+    // Sort sub-locations by scene count (most scenes first)
+    subLocationSceneCount = Object.fromEntries(
+        Object.entries(subLocationSceneCount).sort((a, b) => b[1] - a[1])
+    );
 
-  sub_locations =  Object.fromEntries(
-    Object.entries(sub_locations).sort((a, b) => b[1] - a[1])
-  );
+    // Process each sub-location in order
+    for (let subLocationName in subLocationSceneCount) {
+        let subLocationScenes = locationScenes.filter(scene => 
+            scene.sub_location_name === subLocationName
+        );
+        
+        let sortedSubLocationScenes = sortScenesByLocationType(subLocationScenes);
+        sortedScenes.push(...sortedSubLocationScenes);
+    }
 
-  for (let sub_location in sub_locations){
-    sorted_locScenes.push(...locScenes.filter(scene => scene.sub_location_name == sub_location))
-  }
-
-  return sorted_locScenes
-
+    return sortedScenes;
 }
 
-function sort_locationType(locScenes) {
-  const sorted_locScenes = [];
+// Sort scenes by location type and time of day
+function sortScenesByLocationType(scenes) {
+    const sortedScenes = [];
 
-  sorted_locScenes.push(...locScenes.filter(s => s.location_type === "EXT" && (s.time_of_day === "DAY" || s.time_of_day === "EVENING")));
-  sorted_locScenes.push(...locScenes.filter(s => s.location_type === "INT" && (s.time_of_day === "DAY" || s.time_of_day === "EVENING")));
-  sorted_locScenes.push(...locScenes.filter(s => s.location_type === "INT" && s.time_of_day === "NIGHT"));
-  sorted_locScenes.push(...locScenes.filter(s => s.location_type === "EXT" && s.time_of_day === "NIGHT"));
+    // Order of preference for scheduling:
+    // 1. EXT + DAY/EVENING
+    sortedScenes.push(...scenes.filter(scene => 
+        scene.location_type === "EXT" && 
+        (scene.time_of_day === "DAY" || scene.time_of_day === "EVENING")
+    ));
+    
+    // 2. INT + DAY/EVENING
+    sortedScenes.push(...scenes.filter(scene => 
+        scene.location_type === "INT" && 
+        (scene.time_of_day === "DAY" || scene.time_of_day === "EVENING")
+    ));
+    
+    // 3. INT + NIGHT
+    sortedScenes.push(...scenes.filter(scene => 
+        scene.location_type === "INT" && 
+        scene.time_of_day === "NIGHT"
+    ));
+    
+    // 4. EXT + NIGHT
+    sortedScenes.push(...scenes.filter(scene => 
+        scene.location_type === "EXT" && 
+        scene.time_of_day === "NIGHT"
+    ));
 
-  const knownSceneIds = new Set(sorted_locScenes.map(s => s.scene_number));
-  const otherScenes = locScenes.filter(s => !knownSceneIds.has(s.scene_number));
-
-  sorted_locScenes.push(...otherScenes);
-  return sorted_locScenes;
+    // 5. All other scenes
+    const knownSceneIds = new Set(sortedScenes.map(scene => scene.scene_number));
+    const otherScenes = scenes.filter(scene => !knownSceneIds.has(scene.scene_number));
+    
+    sortedScenes.push(...otherScenes);
+    
+    return sortedScenes;
 }
 
 
