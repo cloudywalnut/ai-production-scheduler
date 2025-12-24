@@ -365,6 +365,42 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "visualize.html"));
 });
 
+// Just Extracts the Data
+app.post("/extract", upload.single("script"), async (req, res) => {
+    if (!req.file) return res.status(400).send("No file uploaded");
+
+    console.log("Original file name:", req.file.originalname);
+    console.log("File size (bytes):", req.file.size);
+
+    // Convert buffer to stream if needed
+    const folderName = `temp_${Date.now()}`
+    fs.mkdirSync(folderName)
+
+    let masterData = [];
+    const pdfChunks = await chunkPDF(req.file.buffer)
+    let i = 1
+    for (const chunk of pdfChunks){
+        fs.writeFileSync(`${folderName}/chunk_${i}.pdf`, chunk);
+        i = i+1;
+    }
+  
+    // Now used to retrieve files
+    const files = fs.readdirSync(folderName);
+    for (const fileName of files){
+        console.log("Now Processing File: " + fileName);
+        const pdfStream = fs.createReadStream(`${folderName}/${fileName}`);
+        const extractedData = await extractData(pdfStream);
+        masterData.push(...extractedData.scenes);
+    }
+
+    fs.rmSync(folderName, { recursive: true, force: true });
+
+    res.json({
+    scenesData: masterData,
+    });
+
+});
+
 // The upload endpoint controls the main logic
 app.post("/upload", upload.single("script"), async (req, res) => {
     if (!req.file) return res.status(400).send("No file uploaded");
