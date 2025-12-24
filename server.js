@@ -402,7 +402,7 @@ app.post("/extract", upload.single("script"), async (req, res) => {
 });
 
 // The upload endpoint controls the main logic
-app.post("/upload", upload.single("script"), async (req, res) => {
+app.post("/schedule", upload.single("script"), async (req, res) => {
     if (!req.file) return res.status(400).send("No file uploaded");
 
     console.log("Original file name:", req.file.originalname);
