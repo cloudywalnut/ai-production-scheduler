@@ -81,6 +81,10 @@ async function extractData(pdfStream) {
       const prompt = `You are a professional Script Breakdown Specialist and Assistant Director.
 
           Your task is to extract scenes from the provided screenplay EXACTLY as they appear.
+          The start of every scene will have a slugline which will contain the location_type like EXT/INT, the
+          location name, the sublocation name and the time of day for example DAY/NIGHT or others. Strictly make sure
+          not to miss any scenes. 
+
           You MUST follow these rules strictly:
 
           1. Do NOT add, invent, or hallucinate ANY information.
