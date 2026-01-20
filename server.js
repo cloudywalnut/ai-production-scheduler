@@ -121,9 +121,10 @@ async function extractData(pdfStream) {
           "lines_count": number,
           "page_estimate": number,
           "scene_summary": "1–2 sentence factual summary using only information directly stated in the scene."
-          "estimatedTime": "Provide the estimated shooting time in hours as a number, based on the length, number of characters, props, stunts, and complexity of the scene."
+          "estimatedTime": "Provide the estimated shooting time in hours as a number, based on the length of the scene. A 1 page
+                            scene would take 2 hours, a 2 page scene would take 4 hours, shorter half page scenes would take 1 hour
+                            and so on."
           }
-
       `;
       
       // Getting the response        
