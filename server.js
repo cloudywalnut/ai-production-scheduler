@@ -451,7 +451,7 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
         return res.status(400).send('No file uploaded.');
     }
     console.log('Received file:', req.file);
-    res.json({ message: 'Audio received', age: 123, filename: req.file.filename });
+    res.json({ message: 'Audio received', age: 123, filename: req.file.originalname });
 })
 
 
