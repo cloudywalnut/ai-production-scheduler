@@ -444,6 +444,18 @@ app.post("/schedule", upload.single("script"), async (req, res) => {
 
 });
 
+
+// The endpoint to take in voice commands and convert it to some actionable function to run on frontend
+app.post("/voice", upload.single("audio"), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).send('No file uploaded.');
+    }
+    console.log('Received file:', req.file);
+    res.send({ message: 'Audio received', filename: req.file.filename });
+})
+
+
+
 app.listen(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
