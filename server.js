@@ -7,7 +7,7 @@ const FormData = require("form-data"); // Needed to Pass Data as a stream to ope
 const path = require("path");
 const { PDFDocument } = require("pdf-lib");
 const {OpenAI} = require("openai");
-// const { Readable } = require("stream"); // Allows Creating Stream of Data
+const { File } = require("node:buffer");
 
 require("dotenv").config();
 
@@ -453,19 +453,25 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
   }
-  console.log("Received file:", req.file);
 
   try {
+    const file = new File(
+      [req.file.buffer],
+      req.file.originalname,
+      { type: req.file.mimetype }
+    );
+
     const transcription = await openai.audio.transcriptions.create({
-      file: req.file.buffer, // in-memory buffer
+      file,
       model: "gpt-4o-transcribe",
     });
 
     res.json({
       message: "Audio received",
-      text: transcription.text, // directly use transcription.text
+      text: transcription.text,
       filename: req.file.originalname,
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).send("Something went wrong");
