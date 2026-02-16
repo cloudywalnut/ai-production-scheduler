@@ -6,6 +6,7 @@ const multer = require("multer"); // Allows in Memory Storage
 const FormData = require("form-data"); // Needed to Pass Data as a stream to openai
 const path = require("path");
 const { PDFDocument } = require("pdf-lib");
+const {OpenAI} = require("openai");
 // const { Readable } = require("stream"); // Allows Creating Stream of Data
 
 require("dotenv").config();
@@ -18,6 +19,7 @@ app.use(cors());
 
 // Getting the api key from the env file
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const openai = new OpenAI();
 
 // Essential Functions:
 
@@ -446,36 +448,29 @@ app.post("/schedule", upload.single("script"), async (req, res) => {
 
 
 // The endpoint to take in voice commands and convert it to some actionable function to run on frontend
+// Endpoint still has some errors not working fine just yet
 app.post("/voice", upload.single("audio"), async (req, res) => {
-    if (!req.file) {
-        return res.status(400).send('No file uploaded.');
-    }
-    console.log('Received file:', req.file);
-    
-    // Call to OpenAI to generate text from the voice
-    const form = new FormData();
-    form.append(
-        "file",
-        req.file.buffer,
-        req.file.originalname
-    )
-    form.append("model", "gpt-4o-transcribe");
-    const response = await fetch(
-    "https://api.openai.com/v1/audio/transcriptions",
-    {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            ...form.getHeaders(), // <-- important!
-        },
-        body: form,
-    }
-    );
-    
-    const data = await response.json()
-    console.log(data);
-    res.json({ message: 'Audio received', text: data.text, filename: req.file.originalname });
-})
+  if (!req.file) {
+    return res.status(400).send("No file uploaded.");
+  }
+  console.log("Received file:", req.file);
+
+  try {
+    const transcription = await openai.audio.transcriptions.create({
+      file: req.file.buffer, // in-memory buffer
+      model: "gpt-4o-transcribe",
+    });
+
+    res.json({
+      message: "Audio received",
+      text: transcription.text, // directly use transcription.text
+      filename: req.file.originalname,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Something went wrong");
+  }
+});
 
 
 app.listen(3000, () => {
