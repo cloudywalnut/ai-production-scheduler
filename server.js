@@ -471,7 +471,8 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
     }
     );
     
-    const data = await response.json()    
+    const data = await response.json()
+    console.log(data);
     res.json({ message: 'Audio received', text: data.text, filename: req.file.originalname });
 })
 
