@@ -451,9 +451,29 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
         return res.status(400).send('No file uploaded.');
     }
     console.log('Received file:', req.file);
-    res.json({ message: 'Audio received', age: 123, filename: req.file.originalname });
+    
+    // Call to OpenAI to generate text from the voice
+    const form = new FormData();
+    form.append(
+        "file",
+        req.file.buffer,
+        req.file.originalname
+    )
+    form.append("model", "gpt-4o-transcribe");
+    const response = await fetch(
+    "https://api.openai.com/v1/audio/transcriptions",
+    {
+        method: "POST",
+        headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: form,
+    }
+    );
+    
+    const data = await response.json()    
+    res.json({ message: 'Audio received', text: data.text, filename: req.file.originalname });
 })
-
 
 
 app.listen(3000, () => {
