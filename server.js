@@ -447,8 +447,7 @@ app.post("/schedule", upload.single("script"), async (req, res) => {
 });
 
 
-// The endpoint to take in voice commands and convert it to some actionable function to run on frontend
-// Endpoint still has some errors not working fine just yet
+// The endpoint to take in voice commands and convert it to text
 app.post("/voice", upload.single("audio"), async (req, res) => {
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
@@ -476,6 +475,7 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
     console.error(err);
     res.status(500).send("Something went wrong");
   }
+
 });
 
 
