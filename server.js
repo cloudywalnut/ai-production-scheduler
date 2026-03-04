@@ -393,11 +393,18 @@ app.post("/extract", upload.single("script"), async (req, res) => {
   
     // Now used to retrieve files
     const files = fs.readdirSync(folderName);
+    const CHUNKS_API_CALLS = [];
     for (const fileName of files){
         console.log("Now Processing File: " + fileName);
         const pdfStream = fs.createReadStream(`${folderName}/${fileName}`);
-        const extractedData = await extractData(pdfStream);
-        masterData.push(...extractedData.scenes);
+        CHUNKS_API_CALLS.push(extractData(pdfStream));
+    }
+
+    // All API calls made parallelly at once and will get results when all complete
+    // extractedData is an array with every index containing the results from the respective call.
+    const extractedData = await Promise.all(CHUNKS_API_CALLS);
+    for (let data of extractedData){
+        masterData.push(...data.scenes)
     }
 
     fs.rmSync(folderName, { recursive: true, force: true });
@@ -479,6 +486,6 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
 });
 
 
-app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+app.listen(5000, () => {
+  console.log("Server running on http://localhost:5000");
 });
