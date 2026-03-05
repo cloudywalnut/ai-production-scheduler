@@ -469,7 +469,7 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
 
     const transcription = await openai.audio.transcriptions.create({
       file,
-      model: "gpt-4o-transcribe",
+      model: "gpt-4o-mini-transcribe",
     });
 
     res.json({
