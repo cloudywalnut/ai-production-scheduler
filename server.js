@@ -105,15 +105,15 @@ async function extractData(pdfStream) {
           Each item in the array MUST follow this schema strictly:
 
           {
-          "scene_number": number,
+          "scene_number": number as specified at the start of slugline.,
           "scene_heading": "string",
           "location_type": "INT | EXT | INT/EXT | I/E | UNKNOWN",
           "location_name": "string or empty",
           "sub_location_name": "string or empty",
           "time_of_day": "DAY | NIGHT | UNKNOWN",
           "characters": ["list of character names"],
-          "props": ["list of props"],
-          "wardrobe": ["list of wardrobe details"],
+          "props": ["list of props - evaluate by reading between the lines"],
+          "wardrobe": ["list of wardrobe details - evaluate by reading between the lines"],
           "set_dressing": ["list of set dressing elements"],
           "vehicles": ["list"],
           "vfx": ["list"],
