@@ -498,6 +498,7 @@ function sortScenesByLocationType(scenes) {
     return sortedScenes;
 }
 
+// Anoother constraint of day time being exceeded should also be added here
 function costOfSchedule(state){
     let cost = 0
 
@@ -516,11 +517,54 @@ function costOfSchedule(state){
     // find character overlap (More Overlap less cost)
     // OT hours totalDayTime - maxHours (The higher the higher the cost)
 
+    Object.keys(dayMap).forEach(day => {
+        let locations = new Set()
+        let subLocations = new Set()
+        let locationTypes = new Set()
+        let charactersMap = {}
+
+        const loc_weight = 100
+        const subLoc_weight = 10
+        const locType_weight = 20
+        const char_weight = 10
+        const charOverlap_weight = -10 
+
+        dayMap[day].forEach(scene => {
+            locations.add(scene.location_name)
+            subLocations.add(scene.sub_location_name)
+            locationTypes.add(scene.location_type)
+
+            scene.characters.forEach(character =>{
+                if (charactersMap[character]){
+                    charactersMap[character] += 1
+                }else{
+                    charactersMap[character] = 1
+                }
+            })
+        })
+        
+        const totalCharacters = Object.keys(charactersMap).length
+
+        let totalCharacterOverlap = 0
+        Object.keys(charactersMap).forEach(char => {
+            totalCharacterOverlap += charactersMap[char] - 1
+        })
+
+        cost += loc_weight * (locations.size - 1) 
+              + subLoc_weight * (subLocations.size - 1) 
+              + locType_weight * (locationTypes.size - 1)
+              + char_weight * totalCharacters 
+              + charOverlap_weight * totalCharacterOverlap
+
+        console.log("The total cost till now is: " + cost);
+
+    })
+
+    return cost
 }
 
-
+// Continue and finish with this algo and try some others tom or later
 function simulatedAnnealing(){
-
 }
 
 subOptimalSchedule = scheduleScenes(scenes, 12);
@@ -532,4 +576,6 @@ scenes.forEach(scene => {
     initState.push(dayIndex+1) 
 })
 
-costOfSchedule(initState); // Should give a numeric value based on some cost function
+// For testing some random initStates - try with a few more to see how well the cost function works
+initState = [1,1,1,1,1,7,7,7,2,3,6,6,6,7,7,2]
+console.log(costOfSchedule(initState)); // Should give a numeric value based on some cost function

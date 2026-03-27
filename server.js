@@ -24,7 +24,7 @@ const openai = new OpenAI();
 // Essential Functions:
 
 // Wants to Chunk Pdf
-async function chunkPDF(buffer, pagesPerChunk = 30) {
+async function chunkPDF(buffer, pagesPerChunk = 20) {
   const pdf = await PDFDocument.load(buffer);
   const totalPages = pdf.getPageCount();
 
