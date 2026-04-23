@@ -1,3 +1,8 @@
 /node_modules
 .env
 /test
+/pdfs
+server-backup.js
+server-backup-2.js
+test.js
+server_DS.js

@@ -1,15 +1,21 @@
-const express = require('express');
-const fs = require('fs');
-const cors = require('cors');
-const axios = require("axios");
-const multer = require("multer"); // Allows in Memory Storage
-const FormData = require("form-data"); // Needed to Pass Data as a stream to openai
-const path = require("path");
-const { PDFDocument } = require("pdf-lib");
-const {OpenAI} = require("openai");
-const { File } = require("node:buffer");
+import express from 'express';
+import fs from 'fs';
+import cors from 'cors';
+import axios from 'axios';
+import multer from 'multer';
+import FormData from 'form-data';
+import path from 'path';
+import { PDFDocument } from 'pdf-lib';
+import OpenAI from 'openai';
+import { File } from 'node:buffer';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
-require("dotenv").config();
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() }); // keeps file in memory
@@ -19,23 +25,109 @@ app.use(cors());
 
 // Getting the api key from the env file
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const openai = new OpenAI();
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 // Essential Functions:
 
 // Wants to Chunk Pdf
-async function chunkPDF(buffer, pagesPerChunk = 30) {
+async function getChunkPartitions(data, pagesPerChunk = 30) {
+
+  const uint8Data = new Uint8Array(data);
+  const pdf = await pdfjsLib.getDocument({ data: uint8Data }).promise;
+  const totalPages = pdf.numPages;
+
+  const chunks = [];
+  const chunkPartitions = [];
+  let bufferText = "";
+  let chunkString = "";
+  let i = 1;
+  let startPage = 1;
+
+  while (i <= totalPages) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+
+    const text = content.items.map(item => item.str).join(" ");
+
+    // normal accumulation
+    if (i % pagesPerChunk !== 0) {
+      chunkString += " " + text;
+    } else {
+      let tokenizedText = text.split(" ");
+      let breakIndex = getBreakIndex(tokenizedText);
+
+      // find next valid break
+      while (breakIndex === -1 && i < totalPages) {
+        i++;
+
+        const nextPage = await pdf.getPage(i);
+        const nextContent = await nextPage.getTextContent();
+        const nextText = nextContent.items.map(item => item.str).join(" ");
+
+        tokenizedText = nextText.split(" ");
+        breakIndex = getBreakIndex(tokenizedText);
+      }
+
+      // safe slicing
+      const currentText = tokenizedText.join(" ");
+      const head = tokenizedText.slice(0, breakIndex).join(" ");
+      const tail = tokenizedText.slice(breakIndex).join(" ");
+
+      chunks.push(bufferText + " " + chunkString + " " + head);
+      chunkPartitions.push([startPage, i])
+      startPage = i;
+
+      bufferText = tail;
+      chunkString = "";
+    }
+
+    i++;
+
+    if (i > totalPages){
+      chunkPartitions.push([startPage, i-1])
+    }
+
+  }
+
+  // push leftover
+  if (chunkString || bufferText) {
+    chunks.push(bufferText + " " + chunkString);
+  }
+
+  return {chunks, chunkPartitions};
+}
+
+
+// To get the breakIndex for chunking
+function getBreakIndex(tokenizedText) {
+  for (let i = 0; i < tokenizedText.length; i++) {
+    if (tokenizedText[i] === "INT." || tokenizedText[i] === "EXT.") {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// pdf-lib has indexing with 0 and pdfJsLib has it with 1
+async function chunkPDF(buffer) {
   const pdf = await PDFDocument.load(buffer);
-  const totalPages = pdf.getPageCount();
+  const { chunkPartitions } = await getChunkPartitions(buffer);
 
   const chunks = [];
 
-  for (let i = 0; i < totalPages; i += pagesPerChunk) {
+  for (let i = 0; i < chunkPartitions.length; i++) {
+    const [start, end] = chunkPartitions[i];
+
     const chunk = await PDFDocument.create();
-    const pages = await chunk.copyPages(
-      pdf,
-      Array.from({ length: Math.min(pagesPerChunk, totalPages - i) }, (_, j) => i + j)
+
+    const pageIndexes = Array.from(
+      { length: end - start + 1 },
+      (_, j) => (start - 1) + j // FIXED
     );
+
+    const pages = await chunk.copyPages(pdf, pageIndexes);
     pages.forEach(p => chunk.addPage(p));
 
     const bytes = await chunk.save();
@@ -45,7 +137,8 @@ async function chunkPDF(buffer, pagesPerChunk = 30) {
   return chunks;
 }
 
-// Extracting Data
+
+
 async function extractData(pdfStream) {
   try {
 
@@ -82,13 +175,17 @@ async function extractData(pdfStream) {
 
       const prompt = `You are a professional Script Breakdown Specialist and Assistant Director.
 
-          Your task is to extract scenes from the provided screenplay EXACTLY as they appear.
-          The start of every scene will have a slugline which will contain the location_type like EXT/INT, the
-          location name, the sublocation name and the time of day for example DAY/NIGHT or others. Strictly make sure
-          not to miss any scenes. 
+        Your task is to extract scenes from the provided screenplay EXACTLY as they appear.
+        The start of every scene will have a slugline which will contain the location_type like EXT/INT, the location name, 
+        the sublocation name and the time of day for example DAY/NIGHT or others. Strictly make sure not to miss any scenes.
 
-          You MUST follow these rules strictly:
+        Very Important Rule:
+        On the first page of the document, If the first page of the document contains two scene sluglines, always ignore the
+        first scene entirely and begin constructing the breakdown from the second slugline. However, if the first page contains
+        only one scene slugline, ignore any content before it and begin the breakdown from that slugline. Additionally, if a 
+        slugline appears at the very end of the last page ignore and do not include that scene to the breakdown.
 
+        You MUST follow these rules strictly as well:
           1. Do NOT add, invent, or hallucinate ANY information.
           2. Only extract what explicitly exists in the script.
           3. A scene begins ONLY when you detect a proper slugline:
@@ -105,7 +202,7 @@ async function extractData(pdfStream) {
           Each item in the array MUST follow this schema strictly:
 
           {
-          "scene_number": number as specified at the start of slugline.,
+          "scene_number": scene number as specified at the start of slugline (Example: 1, 1A, 12A, 3B, 5),
           "scene_heading": "string",
           "location_type": "INT | EXT | INT/EXT | I/E | UNKNOWN",
           "location_name": "string or empty",
@@ -189,6 +286,7 @@ async function extractData(pdfStream) {
       try {
         summary = JSON.parse(summary);
       } catch {
+        console.log("Something was wrong with json parsing")
         summary = { scenes: [] }; // safe fallback
       }
 
@@ -196,14 +294,14 @@ async function extractData(pdfStream) {
 
   } catch (err) {
       // More descriptive error handling for the upload step
-      console.log("Error in summarizePdfFromLocal():", err.message);
+      console.log("Error in the API call:", err.message);
       if (err.response) {
           console.error("OpenAI API response data:", err.response.data);
       }
   }
 }
 
-// Scheduling Scenes
+// Schedule Scenes
 function scheduleScenes(scenes, maxDayTimeHours) {
     // Get locations sorted by most scenes first
     let locationSceneMap = getLocationsSortedBySceneCount(scenes);
@@ -436,16 +534,23 @@ app.post("/schedule", upload.single("script"), async (req, res) => {
   
     // Now used to retrieve files
     const files = fs.readdirSync(folderName);
+    const CHUNKS_API_CALLS = [];
     for (const fileName of files){
         console.log("Now Processing File: " + fileName);
         const pdfStream = fs.createReadStream(`${folderName}/${fileName}`);
-        const extractedData = await extractData(pdfStream);
-        masterData.push(...extractedData.scenes);
+        CHUNKS_API_CALLS.push(extractData(pdfStream));
     }
 
-    const scheduledData = await scheduleScenes(masterData,12);
+    // All API calls made parallelly at once and will get results when all complete
+    // extractedData is an array with every index containing the results from the respective call.
+    const extractedData = await Promise.all(CHUNKS_API_CALLS);
+    for (let data of extractedData){
+        masterData.push(...data.scenes)
+    }
 
     fs.rmSync(folderName, { recursive: true, force: true });
+
+    const scheduledData = await scheduleScenes(masterData,12);
 
     res.json({
     schedule: scheduledData,
@@ -484,6 +589,7 @@ app.post("/voice", upload.single("audio"), async (req, res) => {
   }
 
 });
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
