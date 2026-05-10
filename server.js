@@ -11,6 +11,7 @@ import { File } from 'node:buffer';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import Anthropic from "@anthropic-ai/sdk";
 
 dotenv.config();
 
@@ -28,6 +29,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Essential Functions:
 
@@ -138,168 +141,146 @@ async function chunkPDF(buffer) {
 }
 
 
-
 async function extractData(pdfStream) {
   try {
+    console.log(`Reading PDF from ...`);
 
-      console.log(`Reading PDF from ...`);
+    // === READ PDF INTO BASE64 ===
+    // Claude API accepts PDFs as base64 directly — no file upload step needed
+    console.log("Converting PDF to base64 for Claude...");
 
-      // === UPLOAD FILE ===
-      console.log("Uploading file to OpenAI...");
+    const chunks = [];
+    for await (const chunk of pdfStream) {
+      chunks.push(chunk);
+    }
+    const pdfBuffer = Buffer.concat(chunks);
+    const base64Pdf = pdfBuffer.toString("base64");
 
-      // --- CHANGE 1: Create a FormData instance ---
-      const form = new FormData();
-      form.append('file', pdfStream); // Append the file stream
-      form.append('purpose', 'assistants'); // Append the purpose field
+    console.log("PDF converted successfully.");
 
-      const uploadRes = await axios.post(
-          "https://api.openai.com/v1/files",
-          form, // --- CHANGE 2: Pass the entire FormData object as the data payload ---
-          {
-              headers: {
-                  // --- CHANGE 3: Use form.getHeaders() to set the correct Content-Type with boundary ---
-                  ...form.getHeaders(), 
-                  "Authorization": `Bearer ${OPENAI_API_KEY}`,
-                  // Remove "Content-Type": "multipart/form-data" here, form.getHeaders() provides it
+    // === GENERATE SUMMARY ===
+    console.log("Requesting summary from Claude...");
+
+    const prompt = `You are a professional Script Breakdown Specialist and Assistant Director.
+
+      Your task is to extract scenes from the provided screenplay EXACTLY as they appear.
+      The start of every scene will have a slugline which will contain the location_type like EXT/INT, the location name, 
+      the sublocation name and the time of day for example DAY/NIGHT or others. Strictly make sure not to miss any scenes.
+
+      Very Important Rule:
+      On the first page of the document, If the first page of the document contains two scene sluglines, always ignore the
+      first scene entirely and begin constructing the breakdown from the second slugline. However, if the first page contains
+      only one scene slugline, ignore any content before it and begin the breakdown from that slugline. Additionally, if a 
+      slugline appears at the very end of the last page ignore and do not include that scene to the breakdown.
+
+      You MUST follow these rules strictly as well:
+        1. Do NOT add, invent, or hallucinate ANY information.
+        2. Only extract what explicitly exists in the script.
+        3. A scene begins ONLY when you detect a proper slugline:
+        - INT.
+        - EXT.
+        - INT./EXT.
+        - I/E.
+        4. Never create scenes that do not exist.
+        5. Never create characters, props, locations, or details that are not mentioned.
+        6. If a field has no data in the script, return an empty array or empty string.
+
+        OUTPUT REQUIREMENTS:
+        Return a single JSON object containing a "scenes" array.
+        Each item in the array MUST follow this schema strictly:
+
+        {
+        "scene_number": scene number as specified at the start of slugline (Example: 1, 1A, 12A, 3B, 5),
+        "scene_heading": "string",
+        "location_type": "INT | EXT | INT/EXT | I/E | UNKNOWN",
+        "location_name": "string or empty",
+        "sub_location_name": "string or empty",
+        "time_of_day": "DAY | NIGHT | UNKNOWN",
+        "characters": ["list of character names"],
+        "props": ["list of props - evaluate by reading between the lines"],
+        "wardrobe": ["list of wardrobe details - evaluate by reading between the lines"],
+        "set_dressing": ["list of set dressing elements"],
+        "vehicles": ["list"],
+        "vfx": ["list"],
+        "sfx": ["list"],
+        "stunts": ["list"],
+        "extras": ["list"],
+        "lines_count": number,
+        "page_estimate": number,
+        "scene_summary": "1–2 sentence factual summary using only information directly stated in the scene."
+        "estimatedTime": "Provide the estimated shooting time in hours as a number, based on the length of the scene. A 1 page
+                          scene would take 2 hours, a 2 page scene would take 4 hours, shorter half page scenes would take 1 hour
+                          and so on."
+        }
+
+        Return ONLY the raw JSON object. No explanation, no markdown, no backticks.
+    `;
+
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 12000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: base64Pdf,
               },
-              // Removed redundant 'params', 'maxContentLength', and the incorrectly structured 'data' object
-              maxBodyLength: Infinity, 
-          }
-      );
+            },
+            {
+              type: "text",
+              text: prompt,
+            },
+          ],
+        },
+      ],
+    });
 
-      const file_id = uploadRes.data.id;
-      console.log(`File uploaded successfully with ID: ${file_id}`);
+    // === PARSE RESPONSE ===
+    // Claude returns content as an array of blocks; extract the text block
+    let summary =
+      response.content?.find((block) => block.type === "text")?.text ||
+      "No information generated.";
 
-      // === GENERATE SUMMARY ===
-      console.log("Requesting summary from OpenAI...");
+    console.log("Summary generated successfully!");
+    fs.appendFileSync("claude_response.txt", summary); // Log raw response for debugging
+    
+    // Strip markdown fences
+    summary = summary.replace(/```json|```/g, "").trim();
 
-      const prompt = `You are a professional Script Breakdown Specialist and Assistant Director.
+    const jsonMatch = summary.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      summary = jsonMatch[0];
+    } else {
+      console.log("No JSON object found in response");
+      return { scenes: [] };
+    }
 
-        Your task is to extract scenes from the provided screenplay EXACTLY as they appear.
-        The start of every scene will have a slugline which will contain the location_type like EXT/INT, the location name, 
-        the sublocation name and the time of day for example DAY/NIGHT or others. Strictly make sure not to miss any scenes.
+    try {
+      summary = JSON.parse(summary);
+    } catch {
+      console.log("Something was wrong with json parsing");
+      summary = { scenes: [] }; // safe fallback
+    }
 
-        Very Important Rule:
-        On the first page of the document, If the first page of the document contains two scene sluglines, always ignore the
-        first scene entirely and begin constructing the breakdown from the second slugline. However, if the first page contains
-        only one scene slugline, ignore any content before it and begin the breakdown from that slugline. Additionally, if a 
-        slugline appears at the very end of the last page ignore and do not include that scene to the breakdown.
-
-        You MUST follow these rules strictly as well:
-          1. Do NOT add, invent, or hallucinate ANY information.
-          2. Only extract what explicitly exists in the script.
-          3. A scene begins ONLY when you detect a proper slugline:
-          - INT.
-          - EXT.
-          - INT./EXT.
-          - I/E.
-          4. Never create scenes that do not exist.
-          5. Never create characters, props, locations, or details that are not mentioned.
-          6. If a field has no data in the script, return an empty array or empty string.
-
-          OUTPUT REQUIREMENTS:
-          Return a single JSON object containing a "scenes" array.
-          Each item in the array MUST follow this schema strictly:
-
-          {
-          "scene_number": scene number as specified at the start of slugline (Example: 1, 1A, 12A, 3B, 5),
-          "scene_heading": "string",
-          "location_type": "INT | EXT | INT/EXT | I/E | UNKNOWN",
-          "location_name": "string or empty",
-          "sub_location_name": "string or empty",
-          "time_of_day": "DAY | NIGHT | UNKNOWN",
-          "characters": ["list of character names"],
-          "props": ["list of props - evaluate by reading between the lines"],
-          "wardrobe": ["list of wardrobe details - evaluate by reading between the lines"],
-          "set_dressing": ["list of set dressing elements"],
-          "vehicles": ["list"],
-          "vfx": ["list"],
-          "sfx": ["list"],
-          "stunts": ["list"],
-          "extras": ["list"],
-          "lines_count": number,
-          "page_estimate": number,
-          "scene_summary": "1–2 sentence factual summary using only information directly stated in the scene."
-          "estimatedTime": "Provide the estimated shooting time in hours as a number, based on the length of the scene. A 1 page
-                            scene would take 2 hours, a 2 page scene would take 4 hours, shorter half page scenes would take 1 hour
-                            and so on."
-          }
-      `;
-      
-      // Getting the response        
-      const response = await axios.post(
-          "https://api.openai.com/v1/responses",
-          {
-              model: "gpt-4.1-mini", // model name
-              // max_output_tokens: 32000, // sets max token
-              // temperature: 0, // more predictable answers
-              // top_p: 0.1, // only words with highest probability chosen
-              input: [
-              {
-                  role: "user",
-                  content: [
-                  {
-                      type: "input_text",
-                      text: prompt, // main prompt
-                  },
-                  {
-                      type: "input_file",
-                      file_id // Id of the file in concern
-                  }
-                  ]
-              }
-              ]
-          },
-          {
-              headers: {
-              "Authorization": `Bearer ${OPENAI_API_KEY}`, // OPENAI_API_KEY Parsed for authorization.
-              "Content-Type": "application/json"
-              }
-          }
-      );
-
-
-
-      // ... rest of the code for summary processing and file deletion ...
-      let summary =
-          response.data.output?.[0]?.content?.[0]?.text ||
-          "No information generated.";
-
-      console.log("Summary generated successfully!");
-
-      // === DELETE FILE ===
-      try {
-          await axios.delete(
-              `https://api.openai.com/v1/files/${file_id}`,
-              {
-                  headers: { "Authorization": `Bearer ${OPENAI_API_KEY}` }
-              }
-          );
-          console.log(`File ${file_id} deleted from OpenAI.`);
-      } catch (delErr) {
-          console.log(`Warning: Failed to delete file ${file_id}:`, delErr);
-      }
-
-      // Returning the Summary
-      summary = summary.replace(/```json\s*/g, "").replace(/```/g, "").trim(); // removes the backticks and stuff that comes due to json format
-
-      try {
-        summary = JSON.parse(summary);
-      } catch {
-        console.log("Something was wrong with json parsing")
-        summary = { scenes: [] }; // safe fallback
-      }
-
-      return summary;
+    return summary;
 
   } catch (err) {
-      // More descriptive error handling for the upload step
-      console.log("Error in the API call:", err.message);
-      if (err.response) {
-          console.error("OpenAI API response data:", err.response.data);
-      }
+    console.log("Error in the API call:", err.message);
+    if (err.status) {
+      console.error("Anthropic API status:", err.status);
+    }
+    if (err.error) {
+      console.error("Anthropic API error details:", err.error);
+    }
   }
 }
+
+
 
 // Schedule Scenes
 function scheduleScenes(scenes, maxDayTimeHours) {
